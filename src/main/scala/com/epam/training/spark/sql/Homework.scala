@@ -1,6 +1,6 @@
 package com.epam.training.spark.sql
 
-import org.apache.spark.sql.{DataFrame, Row}
+import org.apache.spark.sql.{Column, DataFrame, Row}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.{SparkConf, SparkContext}
@@ -58,14 +58,47 @@ object Homework {
 
   }
 
-  def readCsvData(sqlContext: HiveContext, rawDataPath: String): DataFrame = ???
+  def readCsvData(sqlContext: HiveContext, rawDataPath: String): DataFrame =
+    sqlContext.read
+        .option("header", "true")
+        .option("delimiter", ";")
+        .schema(Constants.CLIMATE_TYPE)
+        .csv(rawDataPath)
 
-  def findErrors(climateDataFrame: DataFrame): Array[Row] = ???
+  def findErrors(climateDataFrame: DataFrame): Array[Row] = {
+    val sqlctx = climateDataFrame.sqlContext
+    sqlctx.udf.register("isNull", (col: String) => if (col == null) 1 else 0)
+    climateDataFrame.registerTempTable("climate")
+    sqlctx.sql("""
+      SELECT
+        SUM(isNull(observation_date))
+      , SUM(isNull(mean_temperature))
+      , SUM(isNull(max_temperature))
+      , SUM(isNull(min_temperature))
+      , SUM(isNull(precipitation_mm))
+      , SUM(isNull(precipitation_type))
+      , SUM(isNull(sunshine_hours))
+      FROM
+        climate
+    """).collect()
+  }
 
-  def averageTemperature(climateDataFrame: DataFrame, monthNumber: Int, dayOfMonth: Int): DataFrame = ???
+  def averageTemperature(climateDataFrame: DataFrame, monthNumber: Int, dayOfMonth: Int): DataFrame =
+    climateDataFrame.select(col("mean_temperature")).where(month(col("observation_date")) === monthNumber && dayofmonth(col("observation_date")) === dayOfMonth)
 
-  def predictTemperature(climateDataFrame: DataFrame, monthNumber: Int, dayOfMonth: Int): Double = ???
 
+  def predictTemperature(climateDataFrame: DataFrame, monthNumber: Int, dayOfMonth: Int): Double =
+    climateDataFrame
+        .withColumn("nextDay", date_add(col("observation_date"), 1))
+        .withColumn("prevDay", date_add(col("observation_date"), -1))
+        .where(
+              month(col("nextDay")) === monthNumber && dayofmonth(col("nextDay")) === dayOfMonth
+          ||
+              month(col("prevDay")) === monthNumber && dayofmonth(col("prevDay")) === dayOfMonth
+          ||
+              month(col("observation_date")) === monthNumber && dayofmonth(col("observation_date")) === dayOfMonth
+        )
+        .agg(avg("mean_temperature")).first().getDouble(0)
 
 }
 
